@@ -1,0 +1,6 @@
+- Running model on data from knowledge graph, and intergating it into the query
+- -> How to get my extension intergated into the query plan?
+- -> Read volcano paper
+- -> Is cost static defined?
+- How to get the inputs??
+- index = restructuring database to make retrieval easier
