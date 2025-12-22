@@ -48,9 +48,14 @@ pub enum MLElem {
 ```rust 
 LogicalOperator::MLRun(input: MLElem, mlmodels: LogicalOperator, output: Vec<String>)
 ```
-- `input`: query plan representation of the input argument ML Clause
-- `mlmodels`: query plan representation of the Machine Learning model(s), deduced from the runtimes passed as argument to the `ON` keyword
-- `output`: string representation of the variable which is the argument of the `TO` keyword
+- `input`
+	- Query plan representation of the input argument ML Clause
+	- It can either be explicitly specified as a constant value, in which case it is of type `Term`
+	- Otherwise, it can be expressed as a variable, in which case it is of type `LogicalOperator`
+- `mlmodels`
+	- query plan representation of the Machine Learning model(s), deduced from the runtimes passed as argument to the `ON` keyword
+- `output`
+	- string representation of the variable which is the argument of the `TO` keyword
 
 ### Query plan building process
 The pseudocode below explains how the `build_logical_plan_optimized` function will now work
@@ -157,7 +162,20 @@ The pseudocode below explains how the `build_logical_plan_optimized` function wi
 	3. `result = LogicalOperator::Join(result, LogicalOperator::MLRun(MLElem::Const(input_const), MLElem::Var(runselect), output))`
 14. Return `result`
 #### Explanation of the pseudocode
-In the initial query building process, for each pattern in the `WHERE` clause, a `LogicalOperator::Scan` logical operator is created for each of them. All these operators are then stored in a vector called `scan_operators`. The operators in this vector are then ordered in ascending order based on their cost. Thus, the least costly operator is at the beginning of `scan_operators` while the costliest operator is at the end of this vector. Then, we initialise a variable called `result` which takes as value the first element of `scan_operators`.  For each operator 
+In the initial query building process, for each pattern in the `WHERE` clause, a `LogicalOperator::Scan` logical operator is created for each of them. All these operators are then stored in a vector called `scan_operators`. Before adding these Scan operators to the vector, if there are filters that can be pushed down onto these operators, `LogicalOperator::Filter` logical operators are applied to these Scan operators. The operators in this vector are then ordered in ascending order based on their cost. Thus, the least costly operator is at the beginning of `scan_operators` while the costliest operator is at the end of this vector. Then, we initialise a variable called `result` which takes as value the first element of `scan_operators`.  For each operator `op` in `scan_operators`, excluding the first one, a `LogicalOperator::Join` logical operator with as first argument `result` and as second argument `op` is assigned to `result`.
+
+To extend SPARQL with the new clause, this last step of joining the elements of `scan_operators` needs to be extended. In this situation, in case the `input` argument passed to the `RUN` keyword of the `RUN ... ON ... TO ...` clause is a variable, the last element of `scan_operators`, which contains a Scan operator that scans a pattern containing this variable, is first determined. Let us call this last element `lastOp` and the variable `inputVar`. A `LogicalOperator::Join` operator with as first argument `result` and as second argument `lastOp`. A `LogicalOperator::Projection` logical operator is then applied to this Join to project it on the `inputVar` variable. This Projection operator corresponds to extracting the values of the `inputVar` variable from the result of the execution of the Join operator. The Projection operator is also passed to the `LogicalOperator::MLRun` logical operator as its first argument. This first argument corresponds to the data that should be fed to one or more Machine Learning models.
+
+Meanwhile, we chain a series of logical operators that should produce the result of the query below when executed. ``
+```sparql 
+SELECT ?ml
+WHERE{
+	?r rdf:type mls:Run.
+	?r mls:hasOutput ?ml.
+	?ml rdf:type mls:Model.
+} 
+``` 
+This chain of logical operators involves applying a Projection on the `?ml` variable of a Join which has as its first parameter another Join and as its second parameter the Scan on the `?r mls:hasOutput ?ml.` pattern. This inner Join has as its first parameter a Scan on the `?r rdf:type mls:Run.` pattern, and as its second parameter a Scan on the `?ml rdf:type mls:Model.` pattern . This Projection, which retrieves all the values of the `?ml` variable when executed, is passed as the second argument of the `LogicalOperator::MLRun` logical operator. This second argument represents the single or multiple Machine Learning models to which the data, represented by the first argument of the `LogicalOperator::MLRun` logical operator, should be passed to. The third argument of this logical operator is a vector with a single string which indicates the variable where the outputs of the single or multiple Machine Learning models should be stored. We then set the value of `result` to that of a Join that has as its first argument `result` and as its second argument this `LogicalOperator::MLRun` logical operator. For the remaining elements in the `scan_operators` vector, we can join them together with the Join operator in the same way as described in the last sentence of the first paragraph.
 
 ### Physical plan presentation
 ```rust
